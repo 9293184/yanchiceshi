@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Roulette API Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0a0a0f; color: #e5e7eb; font-family: 'Inter', system-ui, sans-serif; }
+    .glow { box-shadow: 0 0 20px rgba(6, 182, 212, 0.15); }
+    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+  </style>
+</head>
+<body class="min-h-screen p-6">
+
+  <div class="max-w-4xl mx-auto">
+    <!-- Header -->
+    <div class="text-center mb-8">
+      <h1 class="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
+        🎰 AI Roulette API Demo
+      </h1>
+      <p class="text-gray-500 mt-2 text-sm">
+        Base URL: <code class="text-cyan-400 bg-gray-800 px-2 py-0.5 rounded">https://yanchiceshi-production.up.railway.app</code>
+      </p>
+    </div>
+
+    <!-- Health Check -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 glow">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">🏥 健康检查</h2>
+        <button onclick="checkHealth()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg transition">
+          GET /health
+        </button>
+      </div>
+      <pre id="health-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-32">点击按钮测试...</pre>
+    </div>
+
+    <!-- Sources -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">📡 供应商列表</h2>
+        <button onclick="getSources()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition">
+          GET /api/sources
+        </button>
+      </div>
+      <pre id="sources-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-48">点击按钮获取...</pre>
+    </div>
+
+    <!-- Models -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-lg font-semibold">📋 模型列表</h2>
+        <div class="flex gap-2">
+          <select id="model-source" class="bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-1.5 text-gray-300">
+            <option value="">全部供应商</option>
+            <option value="commonstack">CommonStack</option>
+            <option value="moonshot">Moonshot</option>
+            <option value="qiniu">七牛云</option>
+            <option value="zhipu">智谱</option>
+            <option value="siliconflow">硅基流动</option>
+            <option value="stepfun">阶跃星辰</option>
+          </select>
+          <button onclick="getModels()" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-lg transition">
+            GET /api/models
+          </button>
+        </div>
+      </div>
+      <div id="models-count" class="text-xs text-gray-500 mb-2"></div>
+      <pre id="models-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-80">点击按钮获取...</pre>
+    </div>
+
+    <!-- Latency Test -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div class="mb-3">
+        <h2 class="text-lg font-semibold mb-3">⚡ 延迟测试</h2>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="text-xs text-gray-500 mb-1 block">供应商 (source)</label>
+            <select id="latency-source" class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300">
+              <option value="commonstack">CommonStack</option>
+              <option value="moonshot">Moonshot</option>
+              <option value="qiniu">七牛云</option>
+              <option value="zhipu">智谱</option>
+              <option value="siliconflow">硅基流动</option>
+              <option value="stepfun">阶跃星辰</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-gray-500 mb-1 block">模型 ID (model)</label>
+            <input id="latency-model" type="text" value="moonshot-v1-8k" placeholder="模型ID"
+              class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300" />
+          </div>
+        </div>
+        <button onclick="testLatency()" id="latency-btn"
+          class="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition">
+          GET /api/latency
+        </button>
+      </div>
+      <pre id="latency-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-48">填写参数后点击按钮...</pre>
+    </div>
+
+    <!-- Batch Latency Test -->
+    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div class="mb-3">
+        <h2 class="text-lg font-semibold mb-3">🚀 批量延迟测试</h2>
+        <p class="text-xs text-gray-500 mb-2">编辑下方 JSON，然后点击测试</p>
+        <textarea id="batch-body" rows="6"
+          class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300 font-mono">{
+  "targets": [
+    { "source": "moonshot", "modelId": "moonshot-v1-8k" },
+    { "source": "stepfun", "modelId": "step-1-8k" }
+  ]
+}</textarea>
+        <button onclick="testBatch()" id="batch-btn"
+          class="mt-2 px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg transition">
+          POST /api/latency/batch
+        </button>
+      </div>
+      <pre id="batch-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-80">编辑 JSON 后点击按钮...</pre>
+    </div>
+
+    <!-- Footer -->
+    <div class="text-center text-gray-600 text-xs mt-8">
+      AI Roulette API · Powered by Express + Railway
+    </div>
+  </div>
+
+<script>
+const BASE = 'https://yanchiceshi-production.up.railway.app';
+
+function fmt(data) {
+  return JSON.stringify(data, null, 2);
+}
+
+function setResult(id, data, ok = true) {
+  const el = document.getElementById(id);
+  el.textContent = typeof data === 'string' ? data : fmt(data);
+  el.className = el.className.replace(/text-\w+-\d+/g, '');
+  el.classList.add(ok ? 'text-green-400' : 'text-red-400');
+}
+
+function setLoading(id) {
+  const el = document.getElementById(id);
+  el.textContent = '⏳ 请求中...';
+  el.className = el.className.replace(/text-\w+-\d+/g, '');
+  el.classList.add('text-cyan-400');
+}
+
+async function apiGet(path) {
+  const res = await fetch(`${BASE}${path}`);
+  return res.json();
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return res.json();
+}
+
+async function checkHealth() {
+  setLoading('health-result');
+  try {
+    const data = await apiGet('/health');
+    setResult('health-result', data);
+  } catch (e) {
+    setResult('health-result', `❌ 错误: ${e.message}`, false);
+  }
+}
+
+async function getSources() {
+  setLoading('sources-result');
+  try {
+    const data = await apiGet('/api/sources');
+    setResult('sources-result', data);
+  } catch (e) {
+    setResult('sources-result', `❌ 错误: ${e.message}`, false);
+  }
+}
+
+async function getModels() {
+  setLoading('models-result');
+  document.getElementById('models-count').textContent = '';
+  try {
+    const source = document.getElementById('model-source').value;
+    const url = source ? `/api/models?source=${source}` : '/api/models';
+    const data = await apiGet(url);
+    const count = data.totalCount || data.count || 0;
+    document.getElementById('models-count').textContent = `共 ${count} 个模型`;
+    setResult('models-result', data);
+  } catch (e) {
+    setResult('models-result', `❌ 错误: ${e.message}`, false);
+  }
+}
+
+async function testLatency() {
+  setLoading('latency-result');
+  const btn = document.getElementById('latency-btn');
+  btn.disabled = true;
+  btn.textContent = '测试中...';
+  try {
+    const source = document.getElementById('latency-source').value;
+    const model = document.getElementById('latency-model').value;
+    const t0 = performance.now();
+    const data = await apiGet(`/api/latency?source=${encodeURIComponent(source)}&model=${encodeURIComponent(model)}`);
+    const clientTime = Math.round(performance.now() - t0);
+    data._clientRoundTrip = `${clientTime}ms`;
+    setResult('latency-result', data, data.success);
+  } catch (e) {
+    setResult('latency-result', `❌ 错误: ${e.message}`, false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'GET /api/latency';
+  }
+}
+
+async function testBatch() {
+  setLoading('batch-result');
+  const btn = document.getElementById('batch-btn');
+  btn.disabled = true;
+  btn.textContent = '测试中...';
+  try {
+    const bodyText = document.getElementById('batch-body').value;
+    const body = JSON.parse(bodyText);
+    const t0 = performance.now();
+    const data = await apiPost('/api/latency/batch', body);
+    const clientTime = Math.round(performance.now() - t0);
+    data._clientRoundTrip = `${clientTime}ms`;
+    setResult('batch-result', data, data.success);
+  } catch (e) {
+    setResult('batch-result', `❌ 错误: ${e.message}`, false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'POST /api/latency/batch';
+  }
+}
+</script>
+
+</body>
+</html>

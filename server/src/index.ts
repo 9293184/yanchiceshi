@@ -1,8 +1,9 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { getAvailableSources } from './sources.js';
+import { getAvailableSources, API_SOURCES } from './sources.js';
 import { fetchAllModels, fetchModels, testLatencyBatch, testModelLatency } from './services.js';
+import { prisma, getUsageStats, logUsage } from './db.js';
 import type { ApiSource } from './sources.js';
 
 const app = express();
@@ -96,6 +97,130 @@ app.get('/api/sources', (_req, res) => {
   res.json({ success: true, sources: getAvailableSources() });
 });
 
+// ============ GET /api/usage ============
+// 查询 Token 用量统计
+// 可选 query: ?source=commonstack&start=2026-02-01&end=2026-02-28
+app.get('/api/usage', async (req, res) => {
+  try {
+    const source = req.query.source as string | undefined;
+    const start = req.query.start as string | undefined;
+    const end = req.query.end as string | undefined;
+
+    const stats = await getUsageStats({
+      source: source || undefined,
+      startDate: start ? new Date(start) : undefined,
+      endDate: end ? new Date(end) : undefined,
+    });
+
+    res.json({ success: true, ...stats });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ GET /api/usage/recent ============
+// 最近 N 条用量记录
+app.get('/api/usage/recent', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const logs = await prisma.usageLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+    });
+    res.json({ success: true, count: logs.length, logs });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ POST /v1/chat/completions ============
+// 代理转发：用户通过我们的 API 访问各供应商的模型
+// Header: X-Source: moonshot (指定供应商)
+// Body: 标准 OpenAI 格式 { model, messages, ... }
+app.post('/v1/chat/completions', async (req, res) => {
+  const startTime = performance.now();
+  try {
+    const source = (req.headers['x-source'] || req.query.source) as ApiSource;
+    if (!source) {
+      res.status(400).json({ error: '需要 X-Source header 或 ?source= 参数指定供应商' });
+      return;
+    }
+
+    const cfg = API_SOURCES[source];
+    if (!cfg) {
+      res.status(400).json({ error: `供应商 "${source}" 未配置或不可用` });
+      return;
+    }
+
+    const body = req.body;
+    if (!body.model || !body.messages) {
+      res.status(400).json({ error: '需要 model 和 messages 字段' });
+      return;
+    }
+
+    const upstream = await fetch(`${cfg.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${cfg.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    const totalTime = Math.round(performance.now() - startTime);
+    const data = await upstream.json() as Record<string, unknown>;
+
+    // 记录 token 用量
+    const usage = (data.usage || {}) as Record<string, number>;
+    const parts = (body.model as string).split('/');
+    const provider = parts.length > 1 ? parts[0] : source;
+    logUsage({
+      source,
+      model: body.model,
+      provider,
+      promptTokens: usage.prompt_tokens || 0,
+      completionTokens: usage.completion_tokens || 0,
+      totalTokens: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      latency: totalTime,
+      success: upstream.ok,
+      error: upstream.ok ? undefined : `HTTP ${upstream.status}`,
+      callerIp: req.ip,
+    });
+
+    res.status(upstream.status).json(data);
+  } catch (err) {
+    const totalTime = Math.round(performance.now() - startTime);
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ GET /v1/models ============
+// 代理转发：获取指定供应商的模型列表
+app.get('/v1/models', async (req, res) => {
+  try {
+    const source = (req.headers['x-source'] || req.query.source) as ApiSource;
+    if (!source) {
+      res.status(400).json({ error: '需要 X-Source header 或 ?source= 参数指定供应商' });
+      return;
+    }
+
+    const cfg = API_SOURCES[source];
+    if (!cfg) {
+      res.status(400).json({ error: `供应商 "${source}" 未配置或不可用` });
+      return;
+    }
+
+    const upstream = await fetch(`${cfg.baseUrl}/models`, {
+      headers: { Authorization: `Bearer ${cfg.key}` },
+    });
+
+    const data = await upstream.json();
+    res.status(upstream.status).json(data);
+  } catch (err) {
+    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ============ 健康检查 ============
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', sources: getAvailableSources().length });
@@ -111,5 +236,9 @@ app.listen(PORT, () => {
   console.log(`  GET  /api/models?source=xxx     — 获取指定供应商模型`);
   console.log(`  GET  /api/latency?source=xxx&model=xxx — 测试单模型延迟`);
   console.log(`  POST /api/latency/batch         — 批量测试延迟`);
+  console.log(`  GET  /api/usage                 — Token 用量统计`);
+  console.log(`  GET  /api/usage/recent          — 最近用量记录`);
+  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source header)`);
+  console.log(`  GET  /v1/models                 — 代理获取模型列表`);
   console.log(`  GET  /health                    — 健康检查`);
 });

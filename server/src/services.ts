@@ -1,4 +1,5 @@
 import { API_SOURCES, type ApiSource, type ApiConfig } from './sources.js';
+import { logUsage } from './db.js';
 
 export interface ModelInfo {
   id: string;
@@ -13,6 +14,9 @@ export interface LatencyResult {
   provider: string;
   source: ApiSource;
   totalTime: number;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
   success: boolean;
   error?: string;
 }
@@ -62,7 +66,7 @@ export async function fetchAllModels(): Promise<ModelInfo[]> {
 export async function testModelLatency(source: ApiSource, modelId: string): Promise<LatencyResult> {
   const cfg = API_SOURCES[source];
   if (!cfg) {
-    return { model: modelId, provider: 'unknown', source, totalTime: 0, success: false, error: 'Source not configured' };
+    return { model: modelId, provider: 'unknown', source, totalTime: 0, promptTokens: 0, completionTokens: 0, totalTokens: 0, success: false, error: 'Source not configured' };
   }
 
   const parts = modelId.split('/');
@@ -88,13 +92,26 @@ export async function testModelLatency(source: ApiSource, modelId: string): Prom
 
     if (!res.ok) {
       const errBody = await res.text();
-      return { model: modelId, provider, source, totalTime, success: false, error: `HTTP ${res.status}: ${errBody.slice(0, 200)}` };
+      const result: LatencyResult = { model: modelId, provider, source, totalTime, promptTokens: 0, completionTokens: 0, totalTokens: 0, success: false, error: `HTTP ${res.status}: ${errBody.slice(0, 200)}` };
+      logUsage({ source, model: modelId, provider, promptTokens: 0, completionTokens: 0, totalTokens: 0, latency: totalTime, success: false, error: result.error });
+      return result;
     }
 
-    return { model: modelId, provider, source, totalTime, success: true };
+    const data = await res.json() as Record<string, unknown>;
+    const usage = (data.usage || {}) as Record<string, number>;
+    const promptTokens = usage.prompt_tokens || 0;
+    const completionTokens = usage.completion_tokens || 0;
+    const totalTokens = usage.total_tokens || promptTokens + completionTokens;
+
+    const result: LatencyResult = { model: modelId, provider, source, totalTime, promptTokens, completionTokens, totalTokens, success: true };
+    logUsage({ source, model: modelId, provider, promptTokens, completionTokens, totalTokens, latency: totalTime, success: true });
+    return result;
   } catch (err) {
     const totalTime = Math.round(performance.now() - startTime);
-    return { model: modelId, provider, source, totalTime, success: false, error: err instanceof Error ? err.message : String(err) };
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const result: LatencyResult = { model: modelId, provider, source, totalTime, promptTokens: 0, completionTokens: 0, totalTokens: 0, success: false, error: errMsg };
+    logUsage({ source, model: modelId, provider, promptTokens: 0, completionTokens: 0, totalTokens: 0, latency: totalTime, success: false, error: errMsg });
+    return result;
   }
 }
 

@@ -1,0 +1,49 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 每次 API 调用的 Token 用量记录
+model UsageLog {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  source         String   // 供应商: commonstack, moonshot, qiniu, zhipu, siliconflow, stepfun
+  model          String   // 模型 ID
+  provider       String   // 模型供应商 (从模型ID解析)
+  promptTokens   Int      @default(0)
+  completionTokens Int    @default(0)
+  totalTokens    Int      @default(0)
+  latency        Int      @default(0)  // 延迟 (ms)
+  success        Boolean  @default(true)
+  error          String?
+  callerIp       String?  // 调用者 IP
+
+  @@index([source])
+  @@index([createdAt])
+  @@index([callerIp])
+}
+
+// 按供应商+模型的每日汇总
+model DailySummary {
+  id               String   @id @default(cuid())
+  date             DateTime @db.Date
+  source           String
+  model            String
+  requestCount     Int      @default(0)
+  totalPromptTokens    Int  @default(0)
+  totalCompletionTokens Int @default(0)
+  totalTokens      Int      @default(0)
+  avgLatency       Int      @default(0)
+  successCount     Int      @default(0)
+  failCount        Int      @default(0)
+
+  @@unique([date, source, model])
+  @@index([date])
+}
