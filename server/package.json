@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "prisma generate && tsc",
-    "start": "prisma migrate deploy && node dist/index.js"
+    "build": "prisma generate",
+    "start": "prisma migrate deploy && tsx src/index.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.4.1",
@@ -14,14 +14,14 @@
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "pg": "^8.18.0",
-    "prisma": "^7.4.1"
+    "prisma": "^7.4.1",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.18",
     "@types/express": "^5.0.0",
     "@types/node": "^24.10.1",
     "@types/pg": "^8.16.0",
-    "tsx": "^4.19.0",
     "typescript": "~5.9.3"
   }
 }
