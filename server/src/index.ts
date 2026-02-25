@@ -56,7 +56,15 @@ app.get('/api/latency', async (req, res) => {
     }
 
     const result = await testModelLatency(source, modelId);
-    res.json({ success: true, result });
+    const billing = {
+      source,
+      model: modelId,
+      provider: result.provider,
+      tokens: { prompt: result.promptTokens, completion: result.completionTokens, total: result.totalTokens },
+      latency: result.totalTime,
+      cost: `${(result.totalTokens * 0.0001).toFixed(4)} MON`,
+    };
+    res.json({ success: true, result, _billing: billing });
   } catch (err) {
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
   }
@@ -80,11 +88,22 @@ app.post('/api/latency/batch', async (req, res) => {
     }
 
     const results = await testLatencyBatch(targets);
+    const totalTokensAll = results.reduce((sum, r) => sum + r.totalTokens, 0);
+    const billing = {
+      totalRequests: results.length,
+      tokens: {
+        prompt: results.reduce((sum, r) => sum + r.promptTokens, 0),
+        completion: results.reduce((sum, r) => sum + r.completionTokens, 0),
+        total: totalTokensAll,
+      },
+      cost: `${(totalTokensAll * 0.0001).toFixed(4)} MON`,
+    };
     res.json({
       success: true,
       count: results.length,
       successCount: results.filter((r) => r.success).length,
       results,
+      _billing: billing,
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
@@ -170,24 +189,39 @@ app.post('/v1/chat/completions', async (req, res) => {
     const totalTime = Math.round(performance.now() - startTime);
     const data = await upstream.json() as Record<string, unknown>;
 
-    // 记录 token 用量
+    // 解析 token 用量
     const usage = (data.usage || {}) as Record<string, number>;
     const parts = (body.model as string).split('/');
     const provider = parts.length > 1 ? parts[0] : source;
+    const promptTokens = usage.prompt_tokens || 0;
+    const completionTokens = usage.completion_tokens || 0;
+    const totalTokens = usage.total_tokens || promptTokens + completionTokens;
+
+    // 记录到数据库
     logUsage({
       source,
       model: body.model,
       provider,
-      promptTokens: usage.prompt_tokens || 0,
-      completionTokens: usage.completion_tokens || 0,
-      totalTokens: usage.total_tokens || (usage.prompt_tokens || 0) + (usage.completion_tokens || 0),
+      promptTokens,
+      completionTokens,
+      totalTokens,
       latency: totalTime,
       success: upstream.ok,
       error: upstream.ok ? undefined : `HTTP ${upstream.status}`,
       callerIp: req.ip,
     });
 
-    res.status(upstream.status).json(data);
+    // 在响应中附带计费信息
+    const billing = {
+      source,
+      model: body.model,
+      provider,
+      tokens: { prompt: promptTokens, completion: completionTokens, total: totalTokens },
+      latency: totalTime,
+      cost: `${(totalTokens * 0.0001).toFixed(4)} MON`,
+    };
+
+    res.status(upstream.status).json({ ...data as object, _billing: billing });
   } catch (err) {
     const totalTime = Math.round(performance.now() - startTime);
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
