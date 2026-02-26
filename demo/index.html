@@ -3,241 +3,378 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>AI Roulette API Demo</title>
+  <title>AI Roulette API Test Console</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     body { background: #0a0a0f; color: #e5e7eb; font-family: 'Inter', system-ui, sans-serif; }
-    .glow { box-shadow: 0 0 20px rgba(6, 182, 212, 0.15); }
-    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-    .pulse-dot { animation: pulse-dot 1.5s ease-in-out infinite; }
+    .card { background: #111118; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+    .card:hover { border-color: #2a2a3e; }
+    pre { white-space: pre-wrap; word-break: break-all; }
+    .billing-tag { background: linear-gradient(135deg, #06b6d4, #8b5cf6); padding: 2px 8px; border-radius: 6px; font-size: 11px; color: white; }
+    .btn { padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.2s; border: none; color: white; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-cyan { background: #0891b2; } .btn-cyan:hover:not(:disabled) { background: #06b6d4; }
+    .btn-indigo { background: #4f46e5; } .btn-indigo:hover:not(:disabled) { background: #6366f1; }
+    .btn-violet { background: #7c3aed; } .btn-violet:hover:not(:disabled) { background: #8b5cf6; }
+    .btn-green { background: #059669; } .btn-green:hover:not(:disabled) { background: #10b981; }
+    .btn-amber { background: #d97706; } .btn-amber:hover:not(:disabled) { background: #f59e0b; }
+    .btn-pink { background: #db2777; } .btn-pink:hover:not(:disabled) { background: #ec4899; }
+    .btn-blue { background: #2563eb; } .btn-blue:hover:not(:disabled) { background: #3b82f6; }
+    .btn-teal { background: #0d9488; } .btn-teal:hover:not(:disabled) { background: #14b8a6; }
+    .input { width: 100%; background: #0a0a12; border: 1px solid #2a2a3e; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: #e5e7eb; }
+    .input:focus { outline: none; border-color: #4f46e5; }
+    select.input { appearance: none; }
+    .result-box { background: #050508; border: 1px solid #1a1a28; border-radius: 8px; padding: 12px; font-size: 12px; font-family: 'JetBrains Mono', monospace; max-height: 300px; overflow: auto; color: #6b7280; }
+    .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #1e1e2e; padding-bottom: 8px; flex-wrap: wrap; }
+    .tab { padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; color: #6b7280; transition: all 0.2s; }
+    .tab:hover { color: #e5e7eb; background: #1a1a28; }
+    .tab.active { color: #06b6d4; background: #0a1a2a; }
+    .section { display: none; }
+    .section.active { display: block; }
+    .billing-box { background: linear-gradient(135deg, #0a1520, #100a20); border: 1px solid #1a2a3a; border-radius: 8px; padding: 12px; margin-top: 12px; }
   </style>
 </head>
-<body class="min-h-screen p-6">
+<body class="min-h-screen p-4 md:p-6">
 
-  <div class="max-w-4xl mx-auto">
-    <!-- Header -->
-    <div class="text-center mb-8">
-      <h1 class="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
-        🎰 AI Roulette API Demo
-      </h1>
-      <p class="text-gray-500 mt-2 text-sm">
-        Base URL: <code class="text-cyan-400 bg-gray-800 px-2 py-0.5 rounded">https://yanchiceshi-production.up.railway.app</code>
-      </p>
-    </div>
+<div class="max-w-5xl mx-auto">
+  <!-- Header -->
+  <div class="text-center mb-6">
+    <h1 class="text-2xl md:text-3xl font-bold bg-gradient-to-r from-cyan-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+      AI Roulette API Test Console
+    </h1>
+    <p class="text-gray-500 mt-1 text-xs">
+      <code class="text-cyan-400/70">https://yanchiceshi-production.up.railway.app</code>
+    </p>
+  </div>
 
-    <!-- Health Check -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6 glow">
+  <!-- Tab Navigation -->
+  <div class="tab-bar">
+    <div class="tab active" onclick="switchTab('health')">Health</div>
+    <div class="tab" onclick="switchTab('sources')">Sources</div>
+    <div class="tab" onclick="switchTab('models')">Models</div>
+    <div class="tab" onclick="switchTab('latency')">Latency</div>
+    <div class="tab" onclick="switchTab('batch')">Batch</div>
+    <div class="tab" onclick="switchTab('proxy')">Proxy Chat</div>
+    <div class="tab" onclick="switchTab('usage')">Usage</div>
+    <div class="tab" onclick="switchTab('recent')">Recent Logs</div>
+  </div>
+
+  <!-- Health -->
+  <div id="sec-health" class="section active">
+    <div class="card">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-lg font-semibold">🏥 健康检查</h2>
-        <button onclick="checkHealth()" class="px-4 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-sm rounded-lg transition">
-          GET /health
-        </button>
+        <h2 class="font-semibold">GET /health</h2>
+        <button onclick="checkHealth()" class="btn btn-cyan">Send</button>
       </div>
-      <pre id="health-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-32">点击按钮测试...</pre>
+      <pre id="health-result" class="result-box">Click Send to test...</pre>
     </div>
+  </div>
 
-    <!-- Sources -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+  <!-- Sources -->
+  <div id="sec-sources" class="section">
+    <div class="card">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-lg font-semibold">📡 供应商列表</h2>
-        <button onclick="getSources()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm rounded-lg transition">
-          GET /api/sources
-        </button>
+        <h2 class="font-semibold">GET /api/sources</h2>
+        <button onclick="getSources()" class="btn btn-indigo">Send</button>
       </div>
-      <pre id="sources-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-48">点击按钮获取...</pre>
+      <pre id="sources-result" class="result-box">Click Send to fetch...</pre>
     </div>
+  </div>
 
-    <!-- Models -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+  <!-- Models -->
+  <div id="sec-models" class="section">
+    <div class="card">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-lg font-semibold">📋 模型列表</h2>
-        <div class="flex gap-2">
-          <select id="model-source" class="bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-1.5 text-gray-300">
-            <option value="">全部供应商</option>
-            <option value="commonstack">CommonStack</option>
-            <option value="moonshot">Moonshot</option>
-            <option value="qiniu">七牛云</option>
-            <option value="zhipu">智谱</option>
-            <option value="siliconflow">硅基流动</option>
-            <option value="stepfun">阶跃星辰</option>
-          </select>
-          <button onclick="getModels()" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-sm rounded-lg transition">
-            GET /api/models
-          </button>
-        </div>
+        <h2 class="font-semibold">GET /api/models</h2>
+        <button onclick="getModels()" class="btn btn-violet">Send</button>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs text-gray-500 mb-1 block">source (optional)</label>
+        <select id="model-source" class="input">
+          <option value="">All</option>
+          <option value="commonstack">CommonStack</option>
+          <option value="moonshot">Moonshot</option>
+          <option value="qiniu">Qiniu</option>
+          <option value="zhipu">Zhipu</option>
+          <option value="siliconflow">SiliconFlow</option>
+          <option value="stepfun">StepFun</option>
+        </select>
       </div>
       <div id="models-count" class="text-xs text-gray-500 mb-2"></div>
-      <pre id="models-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-80">点击按钮获取...</pre>
+      <pre id="models-result" class="result-box" style="max-height:400px">Click Send to fetch...</pre>
     </div>
+  </div>
 
-    <!-- Latency Test -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
-      <div class="mb-3">
-        <h2 class="text-lg font-semibold mb-3">⚡ 延迟测试</h2>
-        <div class="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <label class="text-xs text-gray-500 mb-1 block">供应商 (source)</label>
-            <select id="latency-source" class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300">
-              <option value="commonstack">CommonStack</option>
-              <option value="moonshot">Moonshot</option>
-              <option value="qiniu">七牛云</option>
-              <option value="zhipu">智谱</option>
-              <option value="siliconflow">硅基流动</option>
-              <option value="stepfun">阶跃星辰</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-xs text-gray-500 mb-1 block">模型 ID (model)</label>
-            <input id="latency-model" type="text" value="moonshot-v1-8k" placeholder="模型ID"
-              class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300" />
-          </div>
-        </div>
-        <button onclick="testLatency()" id="latency-btn"
-          class="px-4 py-1.5 bg-green-600 hover:bg-green-500 text-white text-sm rounded-lg transition">
-          GET /api/latency
-        </button>
+  <!-- Latency -->
+  <div id="sec-latency" class="section">
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">GET /api/latency</h2>
+        <button onclick="testLatency()" id="latency-btn" class="btn btn-green">Send</button>
       </div>
-      <pre id="latency-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-48">填写参数后点击按钮...</pre>
+      <div class="grid grid-cols-2 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">source</label>
+          <select id="latency-source" class="input">
+            <option value="commonstack">CommonStack</option>
+            <option value="moonshot" selected>Moonshot</option>
+            <option value="qiniu">Qiniu</option>
+            <option value="zhipu">Zhipu</option>
+            <option value="siliconflow">SiliconFlow</option>
+            <option value="stepfun">StepFun</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">model</label>
+          <input id="latency-model" type="text" value="moonshot-v1-8k" class="input" />
+        </div>
+      </div>
+      <pre id="latency-result" class="result-box">Fill params and click Send...</pre>
     </div>
+  </div>
 
-    <!-- Batch Latency Test -->
-    <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
-      <div class="mb-3">
-        <h2 class="text-lg font-semibold mb-3">🚀 批量延迟测试</h2>
-        <p class="text-xs text-gray-500 mb-2">编辑下方 JSON，然后点击测试</p>
-        <textarea id="batch-body" rows="6"
-          class="w-full bg-gray-800 border border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-300 font-mono">{
+  <!-- Batch -->
+  <div id="sec-batch" class="section">
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">POST /api/latency/batch</h2>
+        <button onclick="testBatch()" id="batch-btn" class="btn btn-amber">Send</button>
+      </div>
+      <label class="text-xs text-gray-500 mb-1 block">Request Body (JSON)</label>
+      <textarea id="batch-body" rows="7" class="input font-mono mb-3">{
   "targets": [
     { "source": "moonshot", "modelId": "moonshot-v1-8k" },
+    { "source": "zhipu", "modelId": "glm-4-flash" },
     { "source": "stepfun", "modelId": "step-1-8k" }
   ]
 }</textarea>
-        <button onclick="testBatch()" id="batch-btn"
-          class="mt-2 px-4 py-1.5 bg-amber-600 hover:bg-amber-500 text-white text-sm rounded-lg transition">
-          POST /api/latency/batch
-        </button>
-      </div>
-      <pre id="batch-result" class="bg-black/50 rounded-lg p-3 text-xs text-gray-400 overflow-auto max-h-80">编辑 JSON 后点击按钮...</pre>
-    </div>
-
-    <!-- Footer -->
-    <div class="text-center text-gray-600 text-xs mt-8">
-      AI Roulette API · Powered by Express + Railway
+      <pre id="batch-result" class="result-box" style="max-height:500px">Edit JSON and click Send...</pre>
     </div>
   </div>
+
+  <!-- Proxy Chat -->
+  <div id="sec-proxy" class="section">
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="font-semibold">POST /v1/chat/completions</h2>
+          <span class="billing-tag">_billing included</span>
+        </div>
+        <button onclick="proxyChat()" id="proxy-btn" class="btn btn-pink">Send</button>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">source</label>
+          <select id="proxy-source" class="input">
+            <option value="commonstack">CommonStack</option>
+            <option value="moonshot" selected>Moonshot</option>
+            <option value="qiniu">Qiniu</option>
+            <option value="zhipu">Zhipu</option>
+            <option value="siliconflow">SiliconFlow</option>
+            <option value="stepfun">StepFun</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">model</label>
+          <input id="proxy-model" type="text" value="moonshot-v1-8k" class="input" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">max_tokens</label>
+          <input id="proxy-max-tokens" type="number" value="30" class="input" />
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs text-gray-500 mb-1 block">message</label>
+        <input id="proxy-message" type="text" value="Hello, introduce yourself in one sentence." class="input" />
+      </div>
+      <pre id="proxy-result" class="result-box" style="max-height:500px">Fill params and click Send...</pre>
+      <div id="proxy-billing" class="billing-box" style="display:none">
+        <div class="text-xs font-semibold text-cyan-400 mb-1">Billing Info</div>
+        <div id="proxy-billing-content" class="text-xs text-gray-400"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Usage -->
+  <div id="sec-usage" class="section">
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">GET /api/usage</h2>
+        <button onclick="getUsage()" class="btn btn-blue">Send</button>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-3">
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">source (optional)</label>
+          <select id="usage-source" class="input">
+            <option value="">All</option>
+            <option value="commonstack">CommonStack</option>
+            <option value="moonshot">Moonshot</option>
+            <option value="qiniu">Qiniu</option>
+            <option value="zhipu">Zhipu</option>
+            <option value="siliconflow">SiliconFlow</option>
+            <option value="stepfun">StepFun</option>
+          </select>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">start date</label>
+          <input id="usage-start" type="date" class="input" />
+        </div>
+        <div>
+          <label class="text-xs text-gray-500 mb-1 block">end date</label>
+          <input id="usage-end" type="date" class="input" />
+        </div>
+      </div>
+      <pre id="usage-result" class="result-box" style="max-height:500px">Click Send to fetch...</pre>
+    </div>
+  </div>
+
+  <!-- Recent -->
+  <div id="sec-recent" class="section">
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold">GET /api/usage/recent</h2>
+        <button onclick="getRecent()" class="btn btn-teal">Send</button>
+      </div>
+      <div class="mb-3">
+        <label class="text-xs text-gray-500 mb-1 block">limit</label>
+        <input id="recent-limit" type="number" value="10" min="1" max="100" class="input" style="width:120px" />
+      </div>
+      <pre id="recent-result" class="result-box" style="max-height:600px">Click Send to fetch...</pre>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="text-center text-gray-600 text-xs mt-6 pb-4">
+    AI Roulette API Console &middot; Express + Prisma + PostgreSQL + Railway
+  </div>
+</div>
 
 <script>
 const BASE = 'https://yanchiceshi-production.up.railway.app';
 
-function fmt(data) {
-  return JSON.stringify(data, null, 2);
-}
+function fmt(d) { return JSON.stringify(d, null, 2); }
+function $(id) { return document.getElementById(id); }
 
 function setResult(id, data, ok = true) {
-  const el = document.getElementById(id);
+  const el = $(id);
   el.textContent = typeof data === 'string' ? data : fmt(data);
-  el.className = el.className.replace(/text-\w+-\d+/g, '');
-  el.classList.add(ok ? 'text-green-400' : 'text-red-400');
+  el.style.color = ok ? '#4ade80' : '#f87171';
 }
-
 function setLoading(id) {
-  const el = document.getElementById(id);
-  el.textContent = '⏳ 请求中...';
-  el.className = el.className.replace(/text-\w+-\d+/g, '');
-  el.classList.add('text-cyan-400');
+  $(id).textContent = 'Loading...';
+  $(id).style.color = '#22d3ee';
 }
 
-async function apiGet(path) {
-  const res = await fetch(`${BASE}${path}`);
-  return res.json();
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  event.target.classList.add('active');
+  $('sec-' + name).classList.add('active');
 }
 
+async function apiGet(path) { return (await fetch(BASE + path)).json(); }
 async function apiPost(path, body) {
-  const res = await fetch(`${BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return res.json();
+  return (await fetch(BASE + path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+  })).json();
 }
 
 async function checkHealth() {
   setLoading('health-result');
-  try {
-    const data = await apiGet('/health');
-    setResult('health-result', data);
-  } catch (e) {
-    setResult('health-result', `❌ 错误: ${e.message}`, false);
-  }
+  try { setResult('health-result', await apiGet('/health')); }
+  catch (e) { setResult('health-result', 'Error: ' + e.message, false); }
 }
 
 async function getSources() {
   setLoading('sources-result');
-  try {
-    const data = await apiGet('/api/sources');
-    setResult('sources-result', data);
-  } catch (e) {
-    setResult('sources-result', `❌ 错误: ${e.message}`, false);
-  }
+  try { setResult('sources-result', await apiGet('/api/sources')); }
+  catch (e) { setResult('sources-result', 'Error: ' + e.message, false); }
 }
 
 async function getModels() {
   setLoading('models-result');
-  document.getElementById('models-count').textContent = '';
+  $('models-count').textContent = '';
   try {
-    const source = document.getElementById('model-source').value;
-    const url = source ? `/api/models?source=${source}` : '/api/models';
-    const data = await apiGet(url);
-    const count = data.totalCount || data.count || 0;
-    document.getElementById('models-count').textContent = `共 ${count} 个模型`;
+    const s = $('model-source').value;
+    const data = await apiGet(s ? `/api/models?source=${s}` : '/api/models');
+    $('models-count').textContent = `${data.totalCount || data.count || 0} models`;
     setResult('models-result', data);
-  } catch (e) {
-    setResult('models-result', `❌ 错误: ${e.message}`, false);
-  }
+  } catch (e) { setResult('models-result', 'Error: ' + e.message, false); }
 }
 
 async function testLatency() {
   setLoading('latency-result');
-  const btn = document.getElementById('latency-btn');
-  btn.disabled = true;
-  btn.textContent = '测试中...';
+  const btn = $('latency-btn'); btn.disabled = true; btn.textContent = 'Testing...';
   try {
-    const source = document.getElementById('latency-source').value;
-    const model = document.getElementById('latency-model').value;
+    const s = $('latency-source').value, m = $('latency-model').value;
     const t0 = performance.now();
-    const data = await apiGet(`/api/latency?source=${encodeURIComponent(source)}&model=${encodeURIComponent(model)}`);
-    const clientTime = Math.round(performance.now() - t0);
-    data._clientRoundTrip = `${clientTime}ms`;
+    const data = await apiGet(`/api/latency?source=${encodeURIComponent(s)}&model=${encodeURIComponent(m)}`);
+    data._clientRoundTrip = Math.round(performance.now() - t0) + 'ms';
     setResult('latency-result', data, data.success);
-  } catch (e) {
-    setResult('latency-result', `❌ 错误: ${e.message}`, false);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'GET /api/latency';
-  }
+  } catch (e) { setResult('latency-result', 'Error: ' + e.message, false); }
+  finally { btn.disabled = false; btn.textContent = 'Send'; }
 }
 
 async function testBatch() {
   setLoading('batch-result');
-  const btn = document.getElementById('batch-btn');
-  btn.disabled = true;
-  btn.textContent = '测试中...';
+  const btn = $('batch-btn'); btn.disabled = true; btn.textContent = 'Testing...';
   try {
-    const bodyText = document.getElementById('batch-body').value;
-    const body = JSON.parse(bodyText);
+    const body = JSON.parse($('batch-body').value);
     const t0 = performance.now();
     const data = await apiPost('/api/latency/batch', body);
-    const clientTime = Math.round(performance.now() - t0);
-    data._clientRoundTrip = `${clientTime}ms`;
+    data._clientRoundTrip = Math.round(performance.now() - t0) + 'ms';
     setResult('batch-result', data, data.success);
-  } catch (e) {
-    setResult('batch-result', `❌ 错误: ${e.message}`, false);
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'POST /api/latency/batch';
-  }
+  } catch (e) { setResult('batch-result', 'Error: ' + e.message, false); }
+  finally { btn.disabled = false; btn.textContent = 'Send'; }
+}
+
+async function proxyChat() {
+  setLoading('proxy-result');
+  $('proxy-billing').style.display = 'none';
+  const btn = $('proxy-btn'); btn.disabled = true; btn.textContent = 'Sending...';
+  try {
+    const source = $('proxy-source').value;
+    const body = {
+      model: $('proxy-model').value,
+      messages: [{ role: 'user', content: $('proxy-message').value }],
+      max_tokens: parseInt($('proxy-max-tokens').value) || 30,
+    };
+    const t0 = performance.now();
+    const data = await apiPost(`/v1/chat/completions?source=${source}`, body);
+    data._clientRoundTrip = Math.round(performance.now() - t0) + 'ms';
+    setResult('proxy-result', data, !!data.choices);
+
+    if (data._billing) {
+      const b = data._billing;
+      $('proxy-billing').style.display = 'block';
+      $('proxy-billing-content').innerHTML =
+        `<b>Source:</b> ${b.source} &nbsp; <b>Model:</b> ${b.model} &nbsp; <b>Provider:</b> ${b.provider}<br>` +
+        `<b>Tokens:</b> ${b.tokens.prompt} prompt + ${b.tokens.completion} completion = <b>${b.tokens.total} total</b><br>` +
+        `<b>Latency:</b> ${b.latency}ms &nbsp; <b>Cost:</b> <span style="color:#f59e0b">${b.cost}</span>`;
+    }
+  } catch (e) { setResult('proxy-result', 'Error: ' + e.message, false); }
+  finally { btn.disabled = false; btn.textContent = 'Send'; }
+}
+
+async function getUsage() {
+  setLoading('usage-result');
+  try {
+    const params = new URLSearchParams();
+    const s = $('usage-source').value; if (s) params.set('source', s);
+    const start = $('usage-start').value; if (start) params.set('start', start);
+    const end = $('usage-end').value; if (end) params.set('end', end);
+    const q = params.toString();
+    setResult('usage-result', await apiGet('/api/usage' + (q ? '?' + q : '')));
+  } catch (e) { setResult('usage-result', 'Error: ' + e.message, false); }
+}
+
+async function getRecent() {
+  setLoading('recent-result');
+  try {
+    const limit = $('recent-limit').value || 10;
+    setResult('recent-result', await apiGet(`/api/usage/recent?limit=${limit}`));
+  } catch (e) { setResult('recent-result', 'Error: ' + e.message, false); }
 }
 </script>
-
 </body>
 </html>

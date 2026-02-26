@@ -3,9 +3,22 @@ import 'dotenv/config';
 export type ApiSource = 'commonstack' | 'moonshot' | 'qiniu' | 'zhipu' | 'siliconflow' | 'stepfun';
 
 export interface ApiConfig {
-  key: string;
+  keys: string[];
+  keyIndex: number;
   baseUrl: string;
   label: string;
+}
+
+/** 获取当前 key */
+export function getKey(cfg: ApiConfig): string {
+  return cfg.keys[cfg.keyIndex];
+}
+
+/** 轮换到下一个 key，返回是否还有更多 key 可试 */
+export function rotateKey(cfg: ApiConfig): boolean {
+  if (cfg.keys.length <= 1) return false;
+  cfg.keyIndex = (cfg.keyIndex + 1) % cfg.keys.length;
+  return true;
 }
 
 const raw: Record<ApiSource, { envKey: string; baseUrl: string; label: string }> = {
@@ -22,7 +35,8 @@ export const API_SOURCES: Partial<Record<ApiSource, ApiConfig>> = {};
 for (const [id, cfg] of Object.entries(raw) as [ApiSource, typeof raw[ApiSource]][]) {
   const key = process.env[cfg.envKey];
   if (key) {
-    API_SOURCES[id] = { key, baseUrl: cfg.baseUrl, label: cfg.label };
+    const keys = key.split(',').map(k => k.trim()).filter(Boolean);
+    API_SOURCES[id] = { keys, keyIndex: 0, baseUrl: cfg.baseUrl, label: cfg.label };
   }
 }
 

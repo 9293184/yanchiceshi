@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import { getAvailableSources, API_SOURCES } from './sources.js';
+import { getAvailableSources, API_SOURCES, getKey, rotateKey } from './sources.js';
 import { fetchAllModels, fetchModels, testLatencyBatch, testModelLatency } from './services.js';
 import { prisma, getUsageStats, logUsage } from './db.js';
 import type { ApiSource } from './sources.js';
@@ -177,17 +177,38 @@ app.post('/v1/chat/completions', async (req, res) => {
       return;
     }
 
-    const upstream = await fetch(`${cfg.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${cfg.key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+    // 尝试请求，如果 key 用完(401/402/429) 自动轮换到下一个
+    const startKeyIndex = cfg.keyIndex;
+    let upstream: Response;
+    let data: Record<string, unknown>;
+    let triedKeys = 0;
+    const maxTries = cfg.keys.length;
+
+    while (true) {
+      upstream = await fetch(`${cfg.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${getKey(cfg)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      triedKeys++;
+
+      // 如果是额度/认证错误且还有备用 key，自动轮换重试
+      if ([401, 402, 429].includes(upstream.status) && triedKeys < maxTries) {
+        const rotated = rotateKey(cfg);
+        if (rotated) {
+          console.log(`⚡ ${source} key #${startKeyIndex} 失败(${upstream.status})，轮换到 key #${cfg.keyIndex}`);
+          continue;
+        }
+      }
+      break;
+    }
 
     const totalTime = Math.round(performance.now() - startTime);
-    const data = await upstream.json() as Record<string, unknown>;
+    data = await upstream!.json() as Record<string, unknown>;
 
     // 解析 token 用量
     const usage = (data.usage || {}) as Record<string, number>;
@@ -245,7 +266,7 @@ app.get('/v1/models', async (req, res) => {
     }
 
     const upstream = await fetch(`${cfg.baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${cfg.key}` },
+      headers: { Authorization: `Bearer ${getKey(cfg)}` },
     });
 
     const data = await upstream.json();

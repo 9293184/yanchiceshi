@@ -1,4 +1,4 @@
-import { API_SOURCES, type ApiSource, type ApiConfig } from './sources.js';
+import { API_SOURCES, type ApiSource, type ApiConfig, getKey } from './sources.js';
 import { logUsage } from './db.js';
 
 export interface ModelInfo {
@@ -27,7 +27,7 @@ export async function fetchModels(source: ApiSource): Promise<ModelInfo[]> {
   if (!cfg) return [];
 
   const res = await fetch(`${cfg.baseUrl}/models`, {
-    headers: { Authorization: `Bearer ${cfg.key}` },
+    headers: { Authorization: `Bearer ${getKey(cfg)}` }
   });
   if (!res.ok) throw new Error(`获取 ${cfg.label} 模型列表失败: ${res.status}`);
   const json = await res.json() as Record<string, unknown>;
@@ -77,7 +77,7 @@ export async function testModelLatency(source: ApiSource, modelId: string): Prom
     const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${cfg.key}`,
+        Authorization: `Bearer ${getKey(cfg)}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
