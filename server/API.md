@@ -1,55 +1,70 @@
-# AI Roulette API 文档
+# AI Roulette Gateway API 文档
 
-> Base URL: `https://yanchiceshi-production.up.railway.app`
+> 参考 sub2api 架构设计的 AI API 网关
+>
+> Base URL: `http://localhost:3001`
+
+---
+
+## 核心特性
+
+- **多供应商代理** — 10 个 AI 供应商，统一接入
+- **Key 透传** — 用户通过 Header 传入自己的 API Key，服务端不存储
+- **SSE 流式转发** — 支持 `stream: true`，逐行透传 + 实时 Usage 提取
+- **自动重试** — 429/5xx 错误指数退避重试，Key 错误直接透传
+- **协议适配** — OpenAI 兼容 / Anthropic Messages / Gemini generateContent
+- **Usage 追踪** — 每次调用记录到 PostgreSQL
 
 ---
 
 ## 接口总览
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/sources` | 获取可用供应商列表 |
-| `GET` | `/api/models` | 获取模型列表 |
-| `GET` | `/api/latency` | 测试单模型延迟 |
-| `POST` | `/api/latency/batch` | 批量测试延迟 |
-| `POST` | `/v1/chat/completions` | **代理转发** — 调用任意供应商模型 |
-| `GET` | `/v1/models` | **代理转发** — 获取供应商模型列表 |
-| `GET` | `/api/usage` | 查询 Token 用量统计 |
-| `GET` | `/api/usage/recent` | 查询最近用量记录 |
-| `GET` | `/health` | 健康检查 |
-
-> 所有涉及 AI 调用的接口响应都附带 `_billing` 计费字段。
+| 方法 | 路径 | 说明 | 鉴权 |
+|------|------|------|------|
+| `POST` | `/v1/chat/completions` | **代理转发** — 聊天补全 | 需要 API Key |
+| `GET` | `/v1/models` | **代理转发** — 模型列表 | 需要 API Key |
+| `GET` | `/api/sources` | 获取可用供应商列表 | 无 |
+| `GET` | `/api/models` | 获取模型列表（内部） | 无 |
+| `GET` | `/api/latency` | 测试单模型延迟 | 无 |
+| `POST` | `/api/latency/batch` | 批量测试延迟 | 无 |
+| `GET` | `/api/usage` | Token 用量统计 | 无 |
+| `GET` | `/api/usage/recent` | 最近用量记录 | 无 |
+| `GET` | `/health` | 健康检查 | 无 |
 
 ---
 
-## 计费说明
+## 供应商列表
 
-每个 AI 调用接口的响应末尾都会附带 `_billing` 字段：
+### 国际供应商（参考 sub2api）
 
-```json
-"_billing": {
-  "source": "moonshot",
-  "model": "moonshot-v1-8k",
-  "provider": "moonshot",
-  "tokens": {
-    "prompt": 8,
-    "completion": 5,
-    "total": 13
-  },
-  "latency": 388,
-  "cost": "0.0013 MON"
-}
-```
+| ID | 名称 | Base URL | 协议 | 鉴权方式 |
+|----|------|----------|------|----------|
+| `openai` | OpenAI | `https://api.openai.com/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `anthropic` | Anthropic (Claude) | `https://api.anthropic.com/v1` | Anthropic Messages | `x-api-key: <key>` |
+| `gemini` | Google Gemini | `https://generativelanguage.googleapis.com` | Gemini generateContent | `x-goog-api-key: <key>` |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
 
-| 字段 | 说明 |
-|------|------|
-| `tokens.prompt` | 输入 Token 数 |
-| `tokens.completion` | 输出 Token 数 |
-| `tokens.total` | 总 Token 数 |
-| `latency` | 服务端处理延迟（ms） |
-| `cost` | 本次请求费用（MON） |
+### 国内供应商
 
-**计费公式**：`1 token = 0.0001 MON`
+| ID | 名称 | Base URL | 协议 | 鉴权方式 |
+|----|------|----------|------|----------|
+| `commonstack` | CommonStack | `https://api.commonstack.ai/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `moonshot` | Moonshot (Kimi) | `https://api.moonshot.cn/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `qiniu` | 七牛云 | `https://api.qnaigc.com/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `zhipu` | 智谱 (GLM) | `https://open.bigmodel.cn/api/paas/v4` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `siliconflow` | 硅基流动 | `https://api.siliconflow.cn/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+| `stepfun` | 阶跃星辰 | `https://api.stepfun.com/v1` | OpenAI 兼容 | `Authorization: Bearer <key>` |
+
+### 三种协议对比（参考 sub2api 架构）
+
+| 维度 | OpenAI 兼容 | Anthropic | Gemini |
+|------|------------|-----------|--------|
+| **鉴权 Header** | `Authorization: Bearer <key>` | `x-api-key: <key>` | `x-goog-api-key: <key>` |
+| **请求路径** | `/v1/chat/completions` | `/v1/messages` | `/v1beta/models/{model}:generateContent` |
+| **流式路径** | 同上 + `stream: true` | 同上 + `stream: true` | `...:{model}:streamGenerateContent?alt=sse` |
+| **Usage 字段** | `usage.prompt_tokens` | `usage.input_tokens` | `usageMetadata.promptTokenCount` |
+| **额外 Header** | 无 | `anthropic-version: 2023-06-01` | 无 |
+| **适用供应商** | OpenAI, DeepSeek, 所有国内供应商 | Anthropic | Google Gemini |
 
 ---
 
@@ -57,56 +72,130 @@
 
 ### `POST /v1/chat/completions`
 
-通过我们的 API 调用任意供应商的模型，兼容 OpenAI 格式。自动记录 Token 消耗并返回计费信息。
+用户传入自己的 API Key，通过网关调用任意供应商。支持流式和非流式。
 
-**请求参数：**
+### 请求 Header
 
-- **Header** 或 **Query** 指定供应商（二选一）：
-  - `X-Source: moonshot`（Header）
-  - `?source=moonshot`（Query）
+| Header | 必填 | 说明 |
+|--------|------|------|
+| `Authorization` | **是** | `Bearer <你的API Key>` — 传入供应商的 Key |
+| `X-Source` | **是** | 供应商 ID（如 `openai`, `anthropic`, `gemini` 等） |
+| `Content-Type` | 是 | `application/json` |
 
-- **Body**：标准 OpenAI Chat Completions 格式
+> `Authorization` 也可以用 `x-api-key` Header 代替
 
-**请求示例：**
+### 请求示例
+
+**OpenAI / DeepSeek / 国内供应商（OpenAI 兼容协议）：**
 ```bash
-curl -X POST https://yanchiceshi-production.up.railway.app/v1/chat/completions?source=moonshot \
+curl -X POST http://localhost:3001/v1/chat/completions \
+  -H "Authorization: Bearer sk-你的OpenAI-Key" \
+  -H "X-Source: openai" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "moonshot-v1-8k",
-    "messages": [{"role": "user", "content": "你好"}],
-    "max_tokens": 20
+    "model": "gpt-4o",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 100
   }'
 ```
 
-**响应示例：**
+**Anthropic (Claude)：**
+```bash
+curl -X POST http://localhost:3001/v1/chat/completions \
+  -H "x-api-key: sk-ant-你的Anthropic-Key" \
+  -H "X-Source: anthropic" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5-20250514",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "max_tokens": 100
+  }'
+```
+
+**Google Gemini：**
+```bash
+curl -X POST http://localhost:3001/v1/chat/completions \
+  -H "x-api-key: AIza你的Gemini-Key" \
+  -H "X-Source: gemini" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gemini-2.5-flash",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+```
+
+**流式请求（任何供应商）：**
+```bash
+curl -X POST http://localhost:3001/v1/chat/completions \
+  -H "Authorization: Bearer sk-你的Key" \
+  -H "X-Source: siliconflow" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-V3",
+    "messages": [{"role": "user", "content": "Hello"}],
+    "stream": true
+  }'
+```
+
+### 响应示例（非流式）
+
 ```json
 {
-  "id": "chatcmpl-699edd49cf88c783890c0e53",
+  "id": "chatcmpl-abc123",
   "object": "chat.completion",
-  "created": 1772019017,
-  "model": "moonshot-v1-8k",
+  "model": "gpt-4o",
   "choices": [
     {
       "index": 0,
-      "message": { "role": "assistant", "content": "Hi there! How can" },
-      "finish_reason": "length"
+      "message": { "role": "assistant", "content": "Hello! How can I help?" },
+      "finish_reason": "stop"
     }
   ],
   "usage": {
     "prompt_tokens": 8,
-    "completion_tokens": 5,
-    "total_tokens": 13
+    "completion_tokens": 7,
+    "total_tokens": 15
   },
   "_billing": {
-    "source": "moonshot",
-    "model": "moonshot-v1-8k",
-    "provider": "moonshot",
-    "tokens": { "prompt": 8, "completion": 5, "total": 13 },
-    "latency": 388,
-    "cost": "0.0013 MON"
+    "source": "openai",
+    "model": "gpt-4o",
+    "provider": "openai",
+    "tokens": { "prompt": 8, "completion": 7, "total": 15 },
+    "latency": 520
   }
 }
 ```
+
+### 响应示例（流式 SSE）
+
+```
+data: {"id":"chatcmpl-abc","choices":[{"delta":{"content":"Hello"}}]}
+
+data: {"id":"chatcmpl-abc","choices":[{"delta":{"content":"!"}}]}
+
+data: {"id":"chatcmpl-abc","choices":[{"delta":{}}],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}
+
+data: [DONE]
+```
+
+### 错误响应
+
+```json
+{
+  "error": {
+    "message": "需要 Authorization: Bearer <key> 或 x-api-key header 传入 API Key",
+    "type": "authentication_error"
+  }
+}
+```
+
+| HTTP 状态码 | type | 说明 |
+|------------|------|------|
+| 400 | `invalid_request_error` | 缺少参数、供应商未配置 |
+| 401 | `authentication_error` | 未传入 API Key |
+| 401/402/403 | (上游透传) | Key 无效/余额不足/权限不足 |
+| 429 | (上游透传) | 限流（会自动重试） |
+| 502 | `upstream_error` | 上游网络错误 |
 
 ---
 
@@ -114,15 +203,15 @@ curl -X POST https://yanchiceshi-production.up.railway.app/v1/chat/completions?s
 
 ### `GET /v1/models`
 
-获取指定供应商的原始模型列表（直接转发上游响应）。
+| Header | 必填 | 说明 |
+|--------|------|------|
+| `Authorization` | **是** | `Bearer <你的API Key>` |
+| `X-Source` | **是** | 供应商 ID |
 
-**请求参数：**
-
-- `X-Source: moonshot`（Header）或 `?source=moonshot`（Query）
-
-**请求示例：**
-```
-GET /v1/models?source=moonshot
+```bash
+curl http://localhost:3001/v1/models \
+  -H "Authorization: Bearer sk-你的Key" \
+  -H "X-Source: openai"
 ```
 
 ---
@@ -131,11 +220,14 @@ GET /v1/models?source=moonshot
 
 ### `GET /api/sources`
 
-**响应示例：**
 ```json
 {
   "success": true,
   "sources": [
+    { "id": "openai", "label": "OpenAI" },
+    { "id": "anthropic", "label": "Anthropic (Claude)" },
+    { "id": "gemini", "label": "Google Gemini" },
+    { "id": "deepseek", "label": "DeepSeek" },
     { "id": "commonstack", "label": "CommonStack" },
     { "id": "moonshot", "label": "Moonshot (Kimi)" },
     { "id": "qiniu", "label": "七牛云" },
@@ -148,281 +240,103 @@ GET /v1/models?source=moonshot
 
 ---
 
-## 4. 获取模型列表
+## 4–9. 其他接口
 
-### `GET /api/models`
+以下接口与之前相同，无需 API Key（使用服务端 .env 配置的 Key）：
 
-获取所有供应商的模型列表，按供应商分组返回。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source` | string | 否 | 指定供应商 ID，不传则返回全部 |
-
-**请求示例：**
-```
-GET /api/models
-GET /api/models?source=moonshot
-```
-
-**响应示例（全部）：**
-```json
-{
-  "success": true,
-  "sources": [
-    { "id": "commonstack", "label": "CommonStack" },
-    { "id": "moonshot", "label": "Moonshot (Kimi)" }
-  ],
-  "totalCount": 128,
-  "bySource": {
-    "commonstack": [
-      {
-        "id": "deepseek/deepseek-chat",
-        "name": "deepseek-chat",
-        "provider": "deepseek",
-        "source": "commonstack",
-        "displayId": "commonstack::deepseek/deepseek-chat"
-      }
-    ],
-    "moonshot": [
-      {
-        "id": "moonshot-v1-8k",
-        "name": "moonshot-v1-8k",
-        "provider": "moonshot",
-        "source": "moonshot",
-        "displayId": "moonshot::moonshot-v1-8k"
-      }
-    ]
-  }
-}
-```
+| 接口 | 说明 |
+|------|------|
+| `GET /api/models` | 获取模型列表（按供应商分组） |
+| `GET /api/latency` | 测试单模型延迟 |
+| `POST /api/latency/batch` | 批量测试延迟 |
+| `GET /api/usage` | Token 用量统计 |
+| `GET /api/usage/recent` | 最近用量记录 |
+| `GET /health` | 健康检查 |
 
 ---
 
-## 5. 测试单模型延迟
+## 架构设计（参考 sub2api）
 
-### `GET /api/latency`
+### 请求流程
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source` | string | 是 | 供应商 ID |
-| `model` | string | 是 | 模型 ID |
-
-**请求示例：**
 ```
-GET /api/latency?source=moonshot&model=moonshot-v1-8k
-```
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "result": {
-    "model": "moonshot-v1-8k",
-    "provider": "moonshot",
-    "source": "moonshot",
-    "totalTime": 347,
-    "promptTokens": 15,
-    "completionTokens": 2,
-    "totalTokens": 17,
-    "success": true
-  },
-  "_billing": {
-    "source": "moonshot",
-    "model": "moonshot-v1-8k",
-    "provider": "moonshot",
-    "tokens": { "prompt": 15, "completion": 2, "total": 17 },
-    "latency": 347,
-    "cost": "0.0017 MON"
-  }
-}
-```
-
----
-
-## 6. 批量测试延迟
-
-### `POST /api/latency/batch`
-
-供应商之间并行，同一供应商内串行，保证延迟数据准确。
-
-**请求体：**
-```json
-{
-  "targets": [
-    { "source": "moonshot", "modelId": "moonshot-v1-8k" },
-    { "source": "qiniu", "modelId": "deepseek-v3" }
-  ]
-}
+客户端
+  │  Authorization: Bearer sk-xxx
+  │  X-Source: openai
+  │  Body: { model, messages, stream? }
+  ▼
+┌───────────────────────────────────────┐
+│  Gateway (index.ts)                     │
+│  1. 提取 source + apiKey                 │
+│  2. 调用 forwardChatCompletion()         │
+└─────────────────┴─────────────────────┘
+                  │
+                  ▼
+┌───────────────────────────────────────┐
+│  gateway.ts                              │
+│  3. extractApiKey() ─ 从 Header 拿 Key   │
+│  4. getProvider() ─ 根据 source 查配置   │
+│  5. transformRequestBody() ─ 模型映射    │
+│  6. filterClientHeaders() ─ 安全过滤     │
+│  7. injectAuthHeaders(h, apiKey)          │
+│     ─ 清除客户端鉴权头                    │
+│     ─ 注入 Bearer/x-api-key/x-goog-api-key│
+│     ─ 注入固定 Header (anthropic-version)  │
+│  8. buildUrl() ─ 构建上游 URL            │
+│     ─ OpenAI: /v1/chat/completions       │
+│     ─ Anthropic: /v1/messages             │
+│     ─ Gemini: /v1beta/models/{m}:action   │
+│  9. fetch() ─ 发送上游请求               │
+│ 10. 重试循环 (429/5xx 指数退避)          │
+└─────────────────┴─────────────────────┘
+                  │
+          ┌───────┴───────┐
+          ▼               ▼
+    非流式响应         SSE 流式响应
+    JSON + _billing   逐行转发 + Usage 提取
+          │               │
+          └───────┬───────┘
+                  ▼
+           logUsage() ─ 记录到 PostgreSQL
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `targets` | array | 是 | 测试目标，最多 50 个 |
-| `targets[].source` | string | 是 | 供应商 ID |
-| `targets[].modelId` | string | 是 | 模型 ID |
+### 重试策略（参考 sub2api 的 shouldRetryUpstreamError）
 
-**响应示例：**
-```json
-{
-  "success": true,
-  "count": 2,
-  "successCount": 2,
-  "results": [
-    {
-      "model": "moonshot-v1-8k",
-      "provider": "moonshot",
-      "source": "moonshot",
-      "totalTime": 347,
-      "promptTokens": 15,
-      "completionTokens": 2,
-      "totalTokens": 17,
-      "success": true
-    }
-  ],
-  "_billing": {
-    "totalRequests": 2,
-    "tokens": { "prompt": 30, "completion": 4, "total": 34 },
-    "cost": "0.0034 MON"
-  }
-}
+| 上游状态码 | 行为 | 说明 |
+|------------|------|------|
+| 429 | 指数退避重试 | 限流，等待后重试 |
+| 500+ | 指数退避重试 | 服务端错误 |
+| 401/402/403 | **直接透传** | Key 错误，返回给用户 |
+| 网络错误 | 指数退避重试 | 连接失败 |
+
+- 最大重试 3 次，总时间预算 30s
+- 退避延迟：1s → 2s → 4s（上限 8s）
+
+### 文件结构
+
+```
+server/src/
+├── providers.ts   # 供应商抽象层（Provider 接口 + 3 个实现类）
+├── gateway.ts     # 核心代理网关（转发 + 重试 + SSE）
+├── index.ts       # Express 路由
+├── sources.ts     # 旧版供应商配置（/api/* 接口使用）
+├── services.ts    # 模型列表/延迟测试服务
+└── db.ts          # PostgreSQL + Usage 追踪
 ```
 
-> 结果按延迟升序排列，失败的排在最后。
+### Provider 类层级
 
----
-
-## 7. Token 用量统计
-
-### `GET /api/usage`
-
-查询历史 Token 消耗汇总，按供应商分组。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `source` | string | 否 | 筛选供应商 |
-| `start` | string | 否 | 起始日期，如 `2026-02-01` |
-| `end` | string | 否 | 结束日期，如 `2026-02-28` |
-
-**请求示例：**
 ```
-GET /api/usage
-GET /api/usage?source=moonshot
-GET /api/usage?start=2026-02-25&end=2026-02-26
+Provider (接口)
+├── OpenAICompatProvider   # OpenAI/DeepSeek/所有国内供应商
+├── AnthropicProvider      # Anthropic Claude
+│   ├─ URL: /chat/completions → /messages
+│   ├─ Header: x-api-key + anthropic-version
+│   ├─ Body: max_output_tokens → max_tokens
+│   └─ Usage: input_tokens / output_tokens
+└── GeminiProvider         # Google Gemini
+    ├─ URL: /v1beta/models/{model}:generateContent
+    ├─ Stream URL: ...streamGenerateContent?alt=sse
+    ├─ Header: x-goog-api-key
+    └─ Usage: usageMetadata.promptTokenCount
 ```
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "totalRequests": 42,
-  "totalTokens": {
-    "prompt": 630,
-    "completion": 210,
-    "total": 840
-  },
-  "bySource": [
-    {
-      "source": "moonshot",
-      "requests": 15,
-      "promptTokens": 225,
-      "completionTokens": 75,
-      "totalTokens": 300,
-      "avgLatency": 355
-    },
-    {
-      "source": "commonstack",
-      "requests": 27,
-      "promptTokens": 405,
-      "completionTokens": 135,
-      "totalTokens": 540,
-      "avgLatency": 892
-    }
-  ]
-}
-```
-
----
-
-## 8. 最近用量记录
-
-### `GET /api/usage/recent`
-
-返回最近 N 条用量明细。
-
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `limit` | number | 否 | 返回条数，默认 20，最多 100 |
-
-**请求示例：**
-```
-GET /api/usage/recent
-GET /api/usage/recent?limit=5
-```
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "count": 2,
-  "logs": [
-    {
-      "id": "cm5abc123",
-      "createdAt": "2026-02-25T11:10:17.000Z",
-      "source": "moonshot",
-      "model": "moonshot-v1-8k",
-      "provider": "moonshot",
-      "promptTokens": 8,
-      "completionTokens": 5,
-      "totalTokens": 13,
-      "latency": 388,
-      "success": true,
-      "error": null,
-      "callerIp": "::1"
-    }
-  ]
-}
-```
-
----
-
-## 9. 健康检查
-
-### `GET /health`
-
-```json
-{
-  "status": "ok",
-  "sources": 6
-}
-```
-
----
-
-## 错误响应
-
-```json
-{
-  "success": false,
-  "error": "错误信息描述"
-}
-```
-
-| HTTP 状态码 | 说明 |
-|------------|------|
-| 200 | 成功 |
-| 400 | 请求参数错误 |
-| 500 | 服务器内部错误 |
-| 502 | 上游供应商请求失败（代理转发） |
-
----
-
-## 供应商 ID 对照表
-
-| ID | 名称 | API 端点 |
-|----|------|----------|
-| `commonstack` | CommonStack | `api.commonstack.ai` |
-| `moonshot` | Moonshot (Kimi) | `api.moonshot.cn` |
-| `qiniu` | 七牛云 | `api.qnaigc.com` |
-| `zhipu` | 智谱 (GLM) | `open.bigmodel.cn` |
-| `siliconflow` | 硅基流动 | `api.siliconflow.cn` |
-| `stepfun` | 阶跃星辰 | `api.stepfun.com` |

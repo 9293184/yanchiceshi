@@ -17,11 +17,7 @@
 | xAI: Grok 4.1 Fast Reasoning | 2M | $0.2 | $0.5 | — | $0.05 |
 | xAI: Grok Code Fast 1 | 256K | $0.2 | $1.5 | — | $0.02 |
 | DeepSeek: DeepSeek V3.2 | 128K | $0.269 | $0.4 | — | $0.1345 |
-| DeepSeek: DeepSeek V3.1 | 128K | $0.27 | $1 | — | $0.135 |
-| Google: Nano Banana | 33K | $0.3 | $2.5 | $0.08333 | $0.03 |
-| MiniMax: MiniMax M2.5 | 205K | $0.3 | $1.2 | — | $0.03 |
-| Google: Gemini 3 Flash | 1M | $0.3 | $2.5 | — | $0.1 |
-| Qwen3 235B A22B Instruct | 1M | $0.3 | $1.5 | — | — |
+| DeepSeek: DeepSeek V3.1 | 128K | $0.2 235B A22B Instruct | 1M | $0.3 | $1.5 | — | — |
 | Google: Gemini 2.5 Flash | 1M | $0.3 | $2.5 | — | $0.03 |
 | MiniMax: MiniMax M2.1 | 205K | $0.3 | $1.2 | — | $0.03 |
 | MiniMax: MiniMax M2 | 200K | $0.3 | $1.2 | — | $0.03 |

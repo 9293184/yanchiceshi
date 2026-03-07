@@ -5,6 +5,8 @@ import { getAvailableSources, API_SOURCES, getKey, rotateKey } from './sources.j
 import { fetchAllModels, fetchModels, testLatencyBatch, testModelLatency } from './services.js';
 import { prisma, getUsageStats, logUsage } from './db.js';
 import type { ApiSource } from './sources.js';
+import { getAvailableProviders, type SourceId } from './providers.js';
+import { forwardChatCompletion, forwardModels } from './gateway.js';
 
 const app = express();
 app.use(cors());
@@ -153,126 +155,45 @@ app.get('/api/usage/recent', async (req, res) => {
 });
 
 // ============ POST /v1/chat/completions ============
-// 代理转发：用户通过我们的 API 访问各供应商的模型
+// 代理转发（新版 Gateway — 参考 sub2api 架构）
+// 支持：重试/Key轮换/SSE流式/Usage追踪
 // Header: X-Source: moonshot (指定供应商)
-// Body: 标准 OpenAI 格式 { model, messages, ... }
+// Body: 标准 OpenAI 格式 { model, messages, stream?, ... }
 app.post('/v1/chat/completions', async (req, res) => {
-  const startTime = performance.now();
+  const source = (req.headers['x-source'] || req.query.source) as SourceId;
+  if (!source) {
+    res.status(400).json({ error: { message: '需要 X-Source header 或 ?source= 参数指定供应商', type: 'invalid_request_error' } });
+    return;
+  }
+
   try {
-    const source = (req.headers['x-source'] || req.query.source) as ApiSource;
-    if (!source) {
-      res.status(400).json({ error: '需要 X-Source header 或 ?source= 参数指定供应商' });
-      return;
+    const result = await forwardChatCompletion(req, res, source);
+    if (result.retryAttempts > 1) {
+      console.log(`[gateway] ${source} 完成: ${result.success ? 'OK' : 'FAIL'} | ` +
+        `重试${result.retryAttempts}次 | ${result.latencyMs}ms`);
     }
-
-    const cfg = API_SOURCES[source];
-    if (!cfg) {
-      res.status(400).json({ error: `供应商 "${source}" 未配置或不可用` });
-      return;
-    }
-
-    const body = req.body;
-    if (!body.model || !body.messages) {
-      res.status(400).json({ error: '需要 model 和 messages 字段' });
-      return;
-    }
-
-    // 尝试请求，如果 key 用完(401/402/429) 自动轮换到下一个
-    const startKeyIndex = cfg.keyIndex;
-    let upstream: Response;
-    let data: Record<string, unknown>;
-    let triedKeys = 0;
-    const maxTries = cfg.keys.length;
-
-    while (true) {
-      upstream = await fetch(`${cfg.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${getKey(cfg)}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      });
-
-      triedKeys++;
-
-      // 如果是额度/认证错误且还有备用 key，自动轮换重试
-      if ([401, 402, 429].includes(upstream.status) && triedKeys < maxTries) {
-        const rotated = rotateKey(cfg);
-        if (rotated) {
-          console.log(`⚡ ${source} key #${startKeyIndex} 失败(${upstream.status})，轮换到 key #${cfg.keyIndex}`);
-          continue;
-        }
-      }
-      break;
-    }
-
-    const totalTime = Math.round(performance.now() - startTime);
-    data = await upstream!.json() as Record<string, unknown>;
-
-    // 解析 token 用量
-    const usage = (data.usage || {}) as Record<string, number>;
-    const parts = (body.model as string).split('/');
-    const provider = parts.length > 1 ? parts[0] : source;
-    const promptTokens = usage.prompt_tokens || 0;
-    const completionTokens = usage.completion_tokens || 0;
-    const totalTokens = usage.total_tokens || promptTokens + completionTokens;
-
-    // 记录到数据库
-    logUsage({
-      source,
-      model: body.model,
-      provider,
-      promptTokens,
-      completionTokens,
-      totalTokens,
-      latency: totalTime,
-      success: upstream.ok,
-      error: upstream.ok ? undefined : `HTTP ${upstream.status}`,
-      callerIp: req.ip,
-    });
-
-    // 在响应中附带计费信息
-    const billing = {
-      source,
-      model: body.model,
-      provider,
-      tokens: { prompt: promptTokens, completion: completionTokens, total: totalTokens },
-      latency: totalTime,
-      cost: `${(totalTokens * 0.0001).toFixed(4)} MON`,
-    };
-
-    res.status(upstream.status).json({ ...data as object, _billing: billing });
   } catch (err) {
-    const totalTime = Math.round(performance.now() - startTime);
-    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    if (!res.headersSent) {
+      res.status(502).json({ error: { message: err instanceof Error ? err.message : String(err), type: 'upstream_error' } });
+    }
   }
 });
 
 // ============ GET /v1/models ============
-// 代理转发：获取指定供应商的模型列表
+// 代理转发（新版 Gateway）
 app.get('/v1/models', async (req, res) => {
+  const source = (req.headers['x-source'] || req.query.source) as SourceId;
+  if (!source) {
+    res.status(400).json({ error: { message: '需要 X-Source header 或 ?source= 参数指定供应商', type: 'invalid_request_error' } });
+    return;
+  }
+
   try {
-    const source = (req.headers['x-source'] || req.query.source) as ApiSource;
-    if (!source) {
-      res.status(400).json({ error: '需要 X-Source header 或 ?source= 参数指定供应商' });
-      return;
-    }
-
-    const cfg = API_SOURCES[source];
-    if (!cfg) {
-      res.status(400).json({ error: `供应商 "${source}" 未配置或不可用` });
-      return;
-    }
-
-    const upstream = await fetch(`${cfg.baseUrl}/models`, {
-      headers: { Authorization: `Bearer ${getKey(cfg)}` },
-    });
-
-    const data = await upstream.json();
-    res.status(upstream.status).json(data);
+    await forwardModels(req, res, source);
   } catch (err) {
-    res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
+    if (!res.headersSent) {
+      res.status(502).json({ error: { message: err instanceof Error ? err.message : String(err), type: 'upstream_error' } });
+    }
   }
 });
 
@@ -293,7 +214,7 @@ app.listen(PORT, () => {
   console.log(`  POST /api/latency/batch         — 批量测试延迟`);
   console.log(`  GET  /api/usage                 — Token 用量统计`);
   console.log(`  GET  /api/usage/recent          — 最近用量记录`);
-  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source header)`);
-  console.log(`  GET  /v1/models                 — 代理获取模型列表`);
+  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source header) [Gateway v2: 重试/SSE/Failover]`);
+  console.log(`  GET  /v1/models                 — 代理获取模型列表 [Gateway v2]`);
   console.log(`  GET  /health                    — 健康检查`);
 });
