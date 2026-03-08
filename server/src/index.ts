@@ -197,24 +197,40 @@ app.get('/v1/models', async (req, res) => {
   }
 });
 
+// ============ GET /v1/providers ============
+// 获取所有 Gateway v2 供应商列表（含国际供应商，Key 由用户传入）
+app.get('/v1/providers', (_req, res) => {
+  const providers = getAvailableProviders();
+  res.json({ success: true, count: providers.length, providers });
+});
+
 // ============ 健康检查 ============
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', sources: getAvailableSources().length });
+  const legacySources = getAvailableSources();
+  const providers = getAvailableProviders();
+  res.json({
+    status: 'ok',
+    legacySources: legacySources.length,
+    providers: providers.length,
+    providerList: providers.map(p => p.id),
+  });
 });
 
 app.listen(PORT, () => {
-  const sources = getAvailableSources();
+  const legacySources = getAvailableSources();
+  const providers = getAvailableProviders();
   console.log(`🚀 AI Roulette API 已启动: http://localhost:${PORT}`);
-  console.log(`📡 已配置 ${sources.length} 个供应商: ${sources.map((s) => s.label).join(', ')}`);
+  console.log(`📡 旧版供应商 (env key): ${legacySources.length} 个 — ${legacySources.map((s) => s.label).join(', ')}`);
+  console.log(`🌐 Gateway v2 供应商: ${providers.length} 个 — ${providers.map((p) => p.label).join(', ')}`);
   console.log(`\n接口列表:`);
-  console.log(`  GET  /api/sources              — 获取可用供应商`);
+  console.log(`  GET  /api/sources              — 获取旧版供应商`);
   console.log(`  GET  /api/models               — 获取所有模型`);
-  console.log(`  GET  /api/models?source=xxx     — 获取指定供应商模型`);
-  console.log(`  GET  /api/latency?source=xxx&model=xxx — 测试单模型延迟`);
+  console.log(`  GET  /api/latency?source&model  — 测试单模型延迟`);
   console.log(`  POST /api/latency/batch         — 批量测试延迟`);
   console.log(`  GET  /api/usage                 — Token 用量统计`);
   console.log(`  GET  /api/usage/recent          — 最近用量记录`);
-  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source header) [Gateway v2: 重试/SSE/Failover]`);
+  console.log(`  GET  /v1/providers              — Gateway v2 供应商列表`);
+  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source + Auth) [Gateway v2]`);
   console.log(`  GET  /v1/models                 — 代理获取模型列表 [Gateway v2]`);
   console.log(`  GET  /health                    — 健康检查`);
 });
