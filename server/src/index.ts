@@ -8,6 +8,7 @@ import type { ApiSource } from './sources.js';
 import { getAvailableProviders, type SourceId } from './providers.js';
 import { forwardChatCompletion, forwardModels } from './gateway.js';
 import { getDefaultUserId, addApiKey, listApiKeys, deleteApiKey, toggleApiKey } from './keystore.js';
+import { handleMessagesRequest } from './messages.js';
 
 const app = express();
 app.use(cors());
@@ -180,6 +181,39 @@ app.post('/v1/chat/completions', async (req, res) => {
   }
 });
 
+// ============ POST /v1/messages ============
+// Anthropic Messages API 格式支持
+// 支持 Claude 特性：thinking、tool use 等
+// Header: X-Source: anthropic (指定供应商)
+// Body: Anthropic Messages 格式 { model, messages, max_tokens, system?, ... }
+app.post('/v1/messages', async (req, res) => {
+  const source = (req.headers['x-source'] || req.query.source) as SourceId;
+  if (!source) {
+    res.status(400).json({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message: '需要 X-Source header 或 ?source= 参数指定供应商',
+      },
+    });
+    return;
+  }
+
+  try {
+    await handleMessagesRequest(req, res, source);
+  } catch (err) {
+    if (!res.headersSent) {
+      res.status(502).json({
+        type: 'error',
+        error: {
+          type: 'api_error',
+          message: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+});
+
 // ============ GET /v1/models ============
 // 代理转发（新版 Gateway）
 app.get('/v1/models', async (req, res) => {
@@ -291,7 +325,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`  POST /v1/keys                   — 添加 API Key { provider, apiKey, label? }`);
   console.log(`  DELETE /v1/keys/:id             — 删除 API Key`);
   console.log(`  PATCH  /v1/keys/:id             — 启用/禁用 Key { isActive }`);
-  console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source + Auth) [Gateway v2]`);
+  console.log(`  POST /v1/chat/completions       — 代理转发 OpenAI 格式 (X-Source + Auth) [Gateway v2]`);
+  console.log(`  POST /v1/messages               — 代理转发 Anthropic Messages 格式 (支持 Claude 特性)`);
   console.log(`  GET  /v1/models                 — 代理获取模型列表 [Gateway v2]`);
   console.log(`  GET  /health                    — 健康检查`);
 });
