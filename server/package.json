@@ -5,17 +5,16 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate",
-    "postinstall": "prisma generate",
-    "start": "npx prisma migrate deploy || echo 'Migration skipped' && npx tsx src/index.ts"
+    "start": "npx prisma migrate deploy && npx tsx src/index.ts"
   },
   "dependencies": {
-    "@prisma/adapter-pg": "^5.22.0",
-    "@prisma/client": "^5.22.0",
+    "@prisma/adapter-pg": "^7.4.1",
+    "@prisma/client": "^7.4.1",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "pg": "^8.18.0",
-    "prisma": "^5.22.0",
+    "prisma": "^7.4.1",
     "tsx": "^4.19.0"
   },
   "devDependencies": {
