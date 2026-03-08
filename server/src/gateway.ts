@@ -13,7 +13,7 @@ import type { Request, Response } from 'express';
 import type { Provider, SourceId, Usage } from './providers.js';
 import { getProvider, filterClientHeaders, extractApiKey } from './providers.js';
 import { logUsage } from './db.js';
-import { getFirstApiKey } from './keystore.js';
+import { getFirstApiKey, getRandomApiKey } from './keystore.js';
 
 // ─── 配置常量 ───────────────────────────────────────────
 
@@ -84,10 +84,13 @@ export async function forwardChatCompletion(
   const startTime = performance.now();
 
   // 1. 提取 API Key：优先用户传入，其次从 DB 读取
-  let apiKey = extractApiKey(req);
+  const userProvidedKey = extractApiKey(req);
+  let apiKey = userProvidedKey;
+  const failedKeys: string[] = []; // 记录失败的 key，用于账号池轮换
+  
   if (!apiKey) {
-    // 尝试从 DB 获取该供应商存储的 Key（参考 sub2api 的 Account Credentials）
-    apiKey = await getFirstApiKey(source) ?? undefined;
+    // 尝试从 DB 获取该供应商存储的 Key（账号池轮换）
+    apiKey = await getRandomApiKey(source, failedKeys) ?? undefined;
   }
   if (!apiKey) {
     res.status(401).json({ error: { message: '需要 Authorization header 传入 API Key，或在系统中预存该供应商的 Key', type: 'authentication_error' } });
@@ -183,7 +186,20 @@ export async function forwardChatCompletion(
       continue;
     }
 
-    // 401/402/403 等 Key 错误直接返回给用户，不重试
+    // 401/403 等 Key 错误：如果是从 DB 获取的 key，尝试轮换到下一个 key
+    if (!userProvidedKey && (status === 401 || status === 403) && attempt < maxRetries) {
+      console.log(`[gateway] ${source} Key 失败 (${status}), 尝试轮换到下一个 key`);
+      failedKeys.push(apiKey);
+      const nextKey = await getRandomApiKey(source, failedKeys);
+      if (nextKey) {
+        apiKey = nextKey;
+        console.log(`[gateway] ${source} 已轮换到新 key`);
+        await sleep(retryBackoffDelay(attempt));
+        continue;
+      }
+      console.warn(`[gateway] ${source} 无可用 key，停止重试`);
+    }
+    // 用户提供的 key 失败，或无更多可用 key，直接返回错误
     break;
   }
 
@@ -428,7 +444,8 @@ export async function forwardModels(
 ): Promise<void> {
   let apiKey = extractApiKey(req);
   if (!apiKey) {
-    apiKey = await getFirstApiKey(source) ?? undefined;
+    // 使用账号池轮换随机选择一个可用 key
+    apiKey = await getRandomApiKey(source) ?? undefined;
   }
   if (!apiKey) {
     res.status(401).json({ error: { message: '需要 Authorization header 传入 API Key，或在系统中预存该供应商的 Key', type: 'authentication_error' } });
