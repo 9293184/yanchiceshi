@@ -273,10 +273,10 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   const legacySources = getAvailableSources();
   const providers = getAvailableProviders();
-  console.log(`🚀 AI Roulette API 已启动: http://localhost:${PORT}`);
+  console.log(`🚀 AI Roulette API 已启动: http://0.0.0.0:${PORT}`);
   console.log(`📡 旧版供应商 (env key): ${legacySources.length} 个 — ${legacySources.map((s) => s.label).join(', ')}`);
   console.log(`🌐 Gateway v2 供应商: ${providers.length} 个 — ${providers.map((p) => p.label).join(', ')}`);
   console.log(`\n接口列表:`);
