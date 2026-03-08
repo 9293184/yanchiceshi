@@ -9,7 +9,7 @@
     "start": "npx prisma migrate deploy || echo 'Migration skipped' && npx tsx src/index.ts"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.12.0"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.4.1",
