@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "prisma generate",
-    "start": "prisma migrate deploy && tsx src/index.ts"
+    "postinstall": "prisma generate",
+    "start": "npx prisma migrate deploy || echo 'Migration skipped' && npx tsx src/index.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.4.1",
