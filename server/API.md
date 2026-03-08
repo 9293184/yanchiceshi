@@ -9,9 +9,11 @@
 ## 核心特性
 
 - **多供应商代理** — 10 个 AI 供应商，统一接入
-- **Key 透传** — 用户通过 Header 传入自己的 API Key，服务端不存储
+- **双模式 Key 管理** — 支持 Header 传入 Key（即时）或数据库存储 Key（持久化）
+- **账号池轮换** — 多个 Key 随机负载均衡，失败自动切换下一个可用 Key
+- **双格式支持** — OpenAI 兼容格式 + Anthropic Messages 格式
 - **SSE 流式转发** — 支持 `stream: true`，逐行透传 + 实时 Usage 提取
-- **自动重试** — 429/5xx 错误指数退避重试，Key 错误直接透传
+- **自动重试** — 429/5xx 错误指数退避重试，Key 错误自动轮换或透传
 - **协议适配** — OpenAI 兼容 / Anthropic Messages / Gemini generateContent
 - **Usage 追踪** — 每次调用记录到 PostgreSQL
 
@@ -19,10 +21,28 @@
 
 ## 接口总览
 
+### Gateway v2 核心接口
+
 | 方法 | 路径 | 说明 | 鉴权 |
 |------|------|------|------|
-| `POST` | `/v1/chat/completions` | **代理转发** — 聊天补全 | 需要 API Key |
-| `GET` | `/v1/models` | **代理转发** — 模型列表 | 需要 API Key |
+| `POST` | `/v1/chat/completions` | **代理转发** — OpenAI 格式聊天补全 | API Key（Header 或 DB）|
+| `POST` | `/v1/messages` | **代理转发** — Anthropic Messages 格式 | API Key（Header 或 DB）|
+| `GET` | `/v1/models` | **代理转发** — 模型列表 | API Key（Header 或 DB）|
+| `GET` | `/v1/providers` | 获取所有供应商列表 | 无 |
+
+### Key 管理接口
+
+| 方法 | 路径 | 说明 | 鉴权 |
+|------|------|------|------|
+| `GET` | `/v1/keys` | 列出已存储的 API Key（脱敏） | 无 |
+| `POST` | `/v1/keys` | 添加 API Key 到数据库 | 无 |
+| `DELETE` | `/v1/keys/:id` | 删除存储的 Key | 无 |
+| `PATCH` | `/v1/keys/:id` | 启用/禁用 Key | 无 |
+
+### 旧版接口（兼容）
+
+| 方法 | 路径 | 说明 | 鉴权 |
+|------|------|------|------|
 | `GET` | `/api/sources` | 获取可用供应商列表 | 无 |
 | `GET` | `/api/models` | 获取模型列表（内部） | 无 |
 | `GET` | `/api/latency` | 测试单模型延迟 | 无 |
@@ -68,21 +88,26 @@
 
 ---
 
-## 1. 代理转发 — 聊天补全
+## 1. 代理转发 — OpenAI 格式聊天补全
 
 ### `POST /v1/chat/completions`
 
-用户传入自己的 API Key，通过网关调用任意供应商。支持流式和非流式。
+支持两种 Key 传入方式：
+1. **Header 传入**（即时）— 通过 `Authorization` 或 `x-api-key` header
+2. **数据库存储**（持久化）— 提前通过 `/v1/keys` 存储，请求时自动使用
+
+如果同时存在多个存储的 Key，系统会**随机选择**（负载均衡），失败时**自动切换**到下一个可用 Key。
 
 ### 请求 Header
 
 | Header | 必填 | 说明 |
 |--------|------|------|
-| `Authorization` | **是** | `Bearer <你的API Key>` — 传入供应商的 Key |
+| `Authorization` | 可选* | `Bearer <你的API Key>` — 即时传入 Key |
+| `x-api-key` | 可选* | 替代 `Authorization` 的方式 |
 | `X-Source` | **是** | 供应商 ID（如 `openai`, `anthropic`, `gemini` 等） |
 | `Content-Type` | 是 | `application/json` |
 
-> `Authorization` 也可以用 `x-api-key` Header 代替
+> *如果未传入 Key，系统会从数据库中随机选择该供应商的可用 Key（账号池轮换）
 
 ### 请求示例
 
@@ -199,7 +224,214 @@ data: [DONE]
 
 ---
 
-## 2. 代理转发 — 模型列表
+## 2. 代理转发 — Anthropic Messages 格式
+
+### `POST /v1/messages`
+
+支持 Anthropic Messages API 格式，适用于需要 Claude 特性的场景（thinking、tool use、多模态等）。
+
+**格式转换**：
+- **Anthropic 供应商** → 直接转发 Messages 格式
+- **其他供应商** → 自动转换为 OpenAI 格式，响应再转回 Messages 格式
+
+### 请求 Header
+
+| Header | 必填 | 说明 |
+|--------|------|------|
+| `x-api-key` | 可选* | API Key（即时传入或从 DB 读取） |
+| `X-Source` | **是** | 供应商 ID |
+| `Content-Type` | 是 | `application/json` |
+
+> *如果未传入 Key，系统会从数据库中随机选择该供应商的可用 Key
+
+### 请求示例
+
+```bash
+curl -X POST http://localhost:3001/v1/messages \
+  -H "x-api-key: sk-ant-你的Key" \
+  -H "X-Source: anthropic" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-3-5-sonnet-20241022",
+    "max_tokens": 1024,
+    "messages": [
+      {"role": "user", "content": "Hello, Claude!"}
+    ]
+  }'
+```
+
+**使用数据库存储的 Key（无需传入 Header）：**
+```bash
+curl -X POST http://localhost:3001/v1/messages?source=commonstack \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4.1",
+    "max_tokens": 100,
+    "messages": [
+      {"role": "user", "content": "Hello"}
+    ],
+    "system": "You are a helpful assistant"
+  }'
+```
+
+### 响应示例
+
+```json
+{
+  "id": "msg_01XYZ",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "Hello! How can I help you today?"
+    }
+  ],
+  "model": "claude-3-5-sonnet-20241022",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 8
+  }
+}
+```
+
+---
+
+## 3. Key 管理接口
+
+### `GET /v1/keys` — 列出已存储的 Key
+
+```bash
+curl http://localhost:3001/v1/keys
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "count": 2,
+  "keys": [
+    {
+      "id": "cmmhrpzaq0001km0o9j34gmp1",
+      "provider": "commonstack",
+      "keyPreview": "ak-2e7***f37a",
+      "label": "黑客松免费额度",
+      "isActive": true,
+      "lastUsedAt": "2026-03-08T12:00:00.000Z",
+      "createdAt": "2026-03-08T10:00:00.000Z"
+    },
+    {
+      "id": "cmmhrpzaq0002km0o9j34gmp2",
+      "provider": "openai",
+      "keyPreview": "sk-abc***xyz",
+      "label": null,
+      "isActive": true,
+      "lastUsedAt": null,
+      "createdAt": "2026-03-08T11:00:00.000Z"
+    }
+  ]
+}
+```
+
+### `POST /v1/keys` — 添加 Key
+
+```bash
+curl -X POST http://localhost:3001/v1/keys \
+  -H "Content-Type: application/json" \
+  -d '{
+    "provider": "commonstack",
+    "apiKey": "ak-2e74796623b8faa67898c5b99048e0a171382d1e7b8916964da6d65d72eaf37a",
+    "label": "黑客松免费额度"
+  }'
+```
+
+**响应：**
+```json
+{
+  "success": true,
+  "id": "cmmhrpzaq0001km0o9j34gmp1",
+  "provider": "commonstack"
+}
+```
+
+### `DELETE /v1/keys/:id` — 删除 Key
+
+```bash
+curl -X DELETE http://localhost:3001/v1/keys/cmmhrpzaq0001km0o9j34gmp1
+```
+
+### `PATCH /v1/keys/:id` — 启用/禁用 Key
+
+```bash
+curl -X PATCH http://localhost:3001/v1/keys/cmmhrpzaq0001km0o9j34gmp1 \
+  -H "Content-Type: application/json" \
+  -d '{"isActive": false}'
+```
+
+---
+
+## 4. 账号池轮换机制
+
+当数据库中存储了多个相同供应商的 Key 时，系统会自动实现账号池轮换：
+
+### 工作流程
+
+```
+请求到达（未传入 Key）
+  ↓
+从 DB 随机选择该供应商的一个可用 Key
+  ↓
+发送请求
+  ↓
+如果返回 401/403（Key 失败）
+  ↓
+记录失败的 Key，排除它
+  ↓
+随机选择下一个可用 Key
+  ↓
+重试请求（最多 3 次）
+```
+
+### 特性
+
+- **负载均衡**：随机选择 Key，避免单个 Key 过载
+- **自动切换**：Key 失败时自动切换到下一个
+- **排除失败**：已失败的 Key 不会被重复使用
+- **使用追踪**：每次使用自动更新 `lastUsedAt`
+
+### 示例场景
+
+假设你存储了 3 个 CommonStack Key：
+```bash
+# 添加第 1 个 Key
+curl -X POST http://localhost:3001/v1/keys \
+  -d '{"provider":"commonstack","apiKey":"ak-key1...","label":"Key 1"}'
+
+# 添加第 2 个 Key
+curl -X POST http://localhost:3001/v1/keys \
+  -d '{"provider":"commonstack","apiKey":"ak-key2...","label":"Key 2"}'
+
+# 添加第 3 个 Key
+curl -X POST http://localhost:3001/v1/keys \
+  -d '{"provider":"commonstack","apiKey":"ak-key3...","label":"Key 3"}'
+```
+
+现在调用 API 时不传入 Key：
+```bash
+curl -X POST http://localhost:3001/v1/chat/completions?source=commonstack \
+  -d '{"model":"openai/gpt-4.1","messages":[{"role":"user","content":"hi"}]}'
+```
+
+系统会：
+1. 随机选择 Key 1、2 或 3
+2. 如果选中的 Key 失败（401/403），自动切换到另一个
+3. 最多尝试 3 个 Key，直到成功或全部失败
+
+---
+
+## 5. 代理转发 — 模型列表
 
 ### `GET /v1/models`
 
