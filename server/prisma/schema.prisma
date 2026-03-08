@@ -10,6 +10,36 @@ datasource db {
   provider = "postgresql"
 }
 
+// 用户表（当前单用户模式，所有请求归属默认用户）
+model User {
+  id        String   @id @default(cuid())
+  name      String   @default("default")
+  email     String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  apiKeys UserApiKey[]
+}
+
+// 用户的 API Key 存储（参考 sub2api 的 Account + Credentials 设计）
+// 每条记录 = 一个供应商的凭证
+model UserApiKey {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider    String   // 供应商 ID: openai, anthropic, gemini, deepseek, commonstack, ...
+  apiKey      String   // 加密存储的 API Key
+  label       String?  // 用户自定义标签（如 "我的 OpenAI 主 Key"）
+  isActive    Boolean  @default(true)
+  lastUsedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([userId, provider, apiKey])
+  @@index([userId, provider])
+  @@index([provider])
+}
+
 // 每次 API 调用的 Token 用量记录
 model UsageLog {
   id             String   @id @default(cuid())

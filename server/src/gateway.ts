@@ -13,6 +13,7 @@ import type { Request, Response } from 'express';
 import type { Provider, SourceId, Usage } from './providers.js';
 import { getProvider, filterClientHeaders, extractApiKey } from './providers.js';
 import { logUsage } from './db.js';
+import { getFirstApiKey } from './keystore.js';
 
 // ─── 配置常量 ───────────────────────────────────────────
 
@@ -82,10 +83,14 @@ export async function forwardChatCompletion(
 ): Promise<ForwardResult> {
   const startTime = performance.now();
 
-  // 1. 提取用户传入的 API Key
-  const apiKey = extractApiKey(req);
+  // 1. 提取 API Key：优先用户传入，其次从 DB 读取
+  let apiKey = extractApiKey(req);
   if (!apiKey) {
-    res.status(401).json({ error: { message: '需要 Authorization: Bearer <key> 或 x-api-key header 传入 API Key', type: 'authentication_error' } });
+    // 尝试从 DB 获取该供应商存储的 Key（参考 sub2api 的 Account Credentials）
+    apiKey = await getFirstApiKey(source) ?? undefined;
+  }
+  if (!apiKey) {
+    res.status(401).json({ error: { message: '需要 Authorization header 传入 API Key，或在系统中预存该供应商的 Key', type: 'authentication_error' } });
     return makeErrorResult(startTime, 401, 'Missing API key');
   }
 
@@ -421,9 +426,12 @@ export async function forwardModels(
   res: Response,
   source: SourceId,
 ): Promise<void> {
-  const apiKey = extractApiKey(req);
+  let apiKey = extractApiKey(req);
   if (!apiKey) {
-    res.status(401).json({ error: { message: '需要 Authorization: Bearer <key> 或 x-api-key header 传入 API Key', type: 'authentication_error' } });
+    apiKey = await getFirstApiKey(source) ?? undefined;
+  }
+  if (!apiKey) {
+    res.status(401).json({ error: { message: '需要 Authorization header 传入 API Key，或在系统中预存该供应商的 Key', type: 'authentication_error' } });
     return;
   }
 

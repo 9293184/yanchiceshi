@@ -7,6 +7,7 @@ import { prisma, getUsageStats, logUsage } from './db.js';
 import type { ApiSource } from './sources.js';
 import { getAvailableProviders, type SourceId } from './providers.js';
 import { forwardChatCompletion, forwardModels } from './gateway.js';
+import { getDefaultUserId, addApiKey, listApiKeys, deleteApiKey, toggleApiKey } from './keystore.js';
 
 const app = express();
 app.use(cors());
@@ -197,6 +198,62 @@ app.get('/v1/models', async (req, res) => {
   }
 });
 
+// ============ GET /v1/keys ============
+// 列出当前用户存储的所有 API Key（脱敏显示）
+app.get('/v1/keys', async (_req, res) => {
+  try {
+    const keys = await listApiKeys();
+    res.json({ success: true, count: keys.length, keys });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ POST /v1/keys ============
+// 添加一个供应商的 API Key
+// body: { provider: "openai", apiKey: "sk-xxx", label?: "我的Key" }
+app.post('/v1/keys', async (req, res) => {
+  try {
+    const { provider, apiKey, label } = req.body as { provider: SourceId; apiKey: string; label?: string };
+    if (!provider || !apiKey) {
+      res.status(400).json({ success: false, error: '需要 provider 和 apiKey 字段' });
+      return;
+    }
+    const key = await addApiKey(provider, apiKey, label);
+    res.json({ success: true, id: key.id, provider: key.provider });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ DELETE /v1/keys/:id ============
+// 删除一个存储的 Key
+app.delete('/v1/keys/:id', async (req, res) => {
+  try {
+    await deleteApiKey(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
+// ============ PATCH /v1/keys/:id ============
+// 启用/禁用一个 Key
+// body: { isActive: true/false }
+app.patch('/v1/keys/:id', async (req, res) => {
+  try {
+    const { isActive } = req.body as { isActive: boolean };
+    if (typeof isActive !== 'boolean') {
+      res.status(400).json({ success: false, error: '需要 isActive 字段 (boolean)' });
+      return;
+    }
+    await toggleApiKey(req.params.id, isActive);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err instanceof Error ? err.message : String(err) });
+  }
+});
+
 // ============ GET /v1/providers ============
 // 获取所有 Gateway v2 供应商列表（含国际供应商，Key 由用户传入）
 app.get('/v1/providers', (_req, res) => {
@@ -230,6 +287,10 @@ app.listen(PORT, () => {
   console.log(`  GET  /api/usage                 — Token 用量统计`);
   console.log(`  GET  /api/usage/recent          — 最近用量记录`);
   console.log(`  GET  /v1/providers              — Gateway v2 供应商列表`);
+  console.log(`  GET  /v1/keys                   — 列出已存储的 API Key（脱敏）`);
+  console.log(`  POST /v1/keys                   — 添加 API Key { provider, apiKey, label? }`);
+  console.log(`  DELETE /v1/keys/:id             — 删除 API Key`);
+  console.log(`  PATCH  /v1/keys/:id             — 启用/禁用 Key { isActive }`);
   console.log(`  POST /v1/chat/completions       — 代理转发 (X-Source + Auth) [Gateway v2]`);
   console.log(`  GET  /v1/models                 — 代理获取模型列表 [Gateway v2]`);
   console.log(`  GET  /health                    — 健康检查`);
